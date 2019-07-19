@@ -7,19 +7,18 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Localization;
 using Microsoft.Extensions.Localization;
 using Microsoft.Extensions.Logging;
-using OrchardCore.ContentManagement.Metadata.Settings;
 using OrchardCore.ContentManagement.Metadata;
 using OrchardCore.ContentManagement.Metadata.Models;
+using OrchardCore.ContentManagement.Metadata.Settings;
 using OrchardCore.ContentTypes.Editors;
 using OrchardCore.ContentTypes.Services;
 using OrchardCore.ContentTypes.ViewModels;
 using OrchardCore.DisplayManagement.ModelBinding;
 using OrchardCore.DisplayManagement.Notify;
 using OrchardCore.Environment.Shell;
+using OrchardCore.Mvc.ActionConstraints;
 using OrchardCore.Mvc.Utilities;
 using YesSql;
-using System.Reflection;
-using OrchardCore.Mvc.ActionConstraints;
 
 namespace OrchardCore.ContentTypes.Controllers
 {
@@ -174,9 +173,6 @@ namespace OrchardCore.ContentTypes.Controllers
             if (!ModelState.IsValid)
             {
                 _session.Cancel();
-
-                HackModelState(nameof(EditTypeViewModel.OrderedFieldNames));
-                HackModelState(nameof(EditTypeViewModel.OrderedPartNames));
 
                 return View(viewModel);
             }
@@ -487,7 +483,7 @@ namespace OrchardCore.ContentTypes.Controllers
             return RedirectToAction("ListParts");
         }
 
-        public async Task<ActionResult> AddFieldTo(string id)
+        public async Task<ActionResult> AddFieldTo(string id, string returnUrl = null)
         {
             if (!await _authorizationService.AuthorizeAsync(User, Permissions.EditContentTypes))
                 return Unauthorized();
@@ -505,11 +501,12 @@ namespace OrchardCore.ContentTypes.Controllers
                 Fields = _contentDefinitionService.GetFields().Select(x => x.Name).OrderBy(x => x).ToList()
             };
 
+            ViewData["ReturnUrl"] = returnUrl;
             return View(viewModel);
         }
 
         [HttpPost, ActionName("AddFieldTo")]
-        public async Task<ActionResult> AddFieldToPOST(AddFieldViewModel viewModel, string id)
+        public async Task<ActionResult> AddFieldToPOST(AddFieldViewModel viewModel, string id, string returnUrl = null)
         {
             if (!await _authorizationService.AuthorizeAsync(User, Permissions.EditContentTypes))
                 return Unauthorized();
@@ -564,6 +561,7 @@ namespace OrchardCore.ContentTypes.Controllers
 
                 _session.Cancel();
 
+                ViewData["ReturnUrl"] = returnUrl;
                 return View(viewModel);
             }
 
@@ -571,10 +569,17 @@ namespace OrchardCore.ContentTypes.Controllers
 
             _notifier.Success(T["The field \"{0}\" has been added.", viewModel.DisplayName]);
 
-            return RedirectToAction("EditField", new { id, viewModel.Name });
+            if (!String.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+            else
+            {
+                return RedirectToAction("EditField", new { id, viewModel.Name });
+            }            
         }
 
-        public async Task<ActionResult> EditField(string id, string name)
+        public async Task<ActionResult> EditField(string id, string name, string returnUrl = null)
         {
             if (!await _authorizationService.AuthorizeAsync(User, Permissions.EditContentTypes))
                 return Unauthorized();
@@ -596,23 +601,30 @@ namespace OrchardCore.ContentTypes.Controllers
             var viewModel = new EditFieldViewModel
             {
                 Name = partFieldDefinition.Name,
+                Editor = partFieldDefinition.Editor(),
+                DisplayMode = partFieldDefinition.DisplayMode(),
                 DisplayName = partFieldDefinition.DisplayName(),
                 PartFieldDefinition = partFieldDefinition,
-                Editor = await _contentDefinitionDisplayManager.BuildPartFieldEditorAsync(partFieldDefinition, this)
+                Shape = await _contentDefinitionDisplayManager.BuildPartFieldEditorAsync(partFieldDefinition, this)
             };
 
+            ViewData["ReturnUrl"] = returnUrl;
             return View(viewModel);
         }
 
         [HttpPost, ActionName("EditField")]
         [FormValueRequired("submit.Save")]
-        public async Task<ActionResult> EditFieldPOST(string id, EditFieldViewModel viewModel)
+        public async Task<ActionResult> EditFieldPOST(string id, EditFieldViewModel viewModel, string returnUrl = null)
         {
             if (!await _authorizationService.AuthorizeAsync(User, Permissions.EditContentTypes))
+            {
                 return Unauthorized();
+            }
 
             if (viewModel == null)
+            {
                 return NotFound();
+            }
 
             var partViewModel = _contentDefinitionService.GetPart(id);
 
@@ -627,6 +639,8 @@ namespace OrchardCore.ContentTypes.Controllers
             {
                 return NotFound();
             }
+            viewModel.PartFieldDefinition = field;
+            viewModel.Shape = await _contentDefinitionDisplayManager.UpdatePartFieldEditorAsync(field, this);
 
             if (field.DisplayName() != viewModel.DisplayName)
             {
@@ -646,19 +660,26 @@ namespace OrchardCore.ContentTypes.Controllers
                 if (!ModelState.IsValid)
                 {
                     _session.Cancel();
+
+                    ViewData["ReturnUrl"] = returnUrl;
                     return View(viewModel);
                 }
-
-                _contentDefinitionService.AlterField(partViewModel, viewModel);
 
                 _notifier.Information(T["Display name changed to {0}.", viewModel.DisplayName]);
             }
 
-            viewModel.Editor = await _contentDefinitionDisplayManager.UpdatePartFieldEditorAsync(field, this);
+            _contentDefinitionService.AlterField(partViewModel, viewModel);
+
+            // Refresh the local field variable in case it has been altered
+            field = _contentDefinitionManager.GetPartDefinition(id).Fields.FirstOrDefault(x => x.Name == viewModel.Name);
+
+            viewModel.Shape = await _contentDefinitionDisplayManager.UpdatePartFieldEditorAsync(field, this);
 
             if (!ModelState.IsValid)
             {
                 _session.Cancel();
+
+                ViewData["ReturnUrl"] = returnUrl;
                 return View(viewModel);
             }
             else
@@ -666,14 +687,22 @@ namespace OrchardCore.ContentTypes.Controllers
                 _notifier.Success(T["The \"{0}\" field settings have been saved.", field.DisplayName()]);
             }
 
-            // Redirect to the type editor if a type exists with this name
-            var typeViewModel = _contentDefinitionService.GetType(id);
-            if (typeViewModel != null)
-            {
-                return RedirectToAction("Edit", new { id });
-            }
 
-            return RedirectToAction("EditPart", new { id });
+            if (!String.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            {
+                return Redirect(returnUrl);
+            }
+            else
+            {
+                // Redirect to the type editor if a type exists with this name
+                var typeViewModel = _contentDefinitionService.GetType(id);
+                if (typeViewModel != null)
+                {
+                    return RedirectToAction("Edit", new { id });
+                }
+
+                return RedirectToAction("EditPart", new { id });
+            }
         }
 
         [HttpPost, ActionName("RemoveFieldFrom")]
@@ -733,10 +762,11 @@ namespace OrchardCore.ContentTypes.Controllers
             var typePartViewModel = new EditTypePartViewModel
             {
                 Name = typePartDefinition.Name,
+                Editor = typePartDefinition.Editor(),
                 DisplayName = typePartDefinition.DisplayName(),
                 Description = typePartDefinition.Description(),
                 TypePartDefinition = typePartDefinition,
-                Editor = await _contentDefinitionDisplayManager.BuildTypePartEditorAsync(typePartDefinition, this)
+                Shape = await _contentDefinitionDisplayManager.BuildTypePartEditorAsync(typePartDefinition, this)
             };
 
             return View(typePartViewModel);
@@ -794,11 +824,11 @@ namespace OrchardCore.ContentTypes.Controllers
                     }
 
                 }
-
-                _contentDefinitionService.AlterTypePart(viewModel);
             }
 
-            viewModel.Editor = await _contentDefinitionDisplayManager.UpdateTypePartEditorAsync(part, this);
+            _contentDefinitionService.AlterTypePart(viewModel);
+
+            viewModel.Shape = await _contentDefinitionDisplayManager.UpdateTypePartEditorAsync(part, this);
 
             if (!ModelState.IsValid)
             {
@@ -814,14 +844,5 @@ namespace OrchardCore.ContentTypes.Controllers
         }
 
         #endregion
-
-        private void HackModelState(string key)
-        {
-            // TODO: Remove this once https://github.com/aspnet/Mvc/issues/4989 has shipped
-            var modelStateEntry = ModelState[key];
-            var nodeType = modelStateEntry.GetType();
-            nodeType.GetMethod("GetNode").Invoke(modelStateEntry, new object[] { new Microsoft.Extensions.Primitives.StringSegment("--!!f-a-k-e"), true });
-            ((System.Collections.IList)nodeType.GetProperty("ChildNodes").GetValue(modelStateEntry)).Clear();
-        }
     }
 }

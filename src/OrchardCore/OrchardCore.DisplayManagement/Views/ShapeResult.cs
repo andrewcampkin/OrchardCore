@@ -5,6 +5,7 @@ using OrchardCore.DisplayManagement.Descriptors;
 using OrchardCore.DisplayManagement.Handlers;
 using OrchardCore.DisplayManagement.Implementation;
 using OrchardCore.DisplayManagement.Shapes;
+using OrchardCore.DisplayManagement.Zones;
 using OrchardCore.Environment.Cache;
 
 namespace OrchardCore.DisplayManagement.Views
@@ -50,6 +51,12 @@ namespace OrchardCore.DisplayManagement.Views
 
         private async Task ApplyImplementationAsync(BuildShapeContext context, string displayType)
         {
+            // If no location is set from the driver, use the one from the context
+            if (String.IsNullOrEmpty(_defaultLocation))
+            {
+                _defaultLocation = context.DefaultZone;
+            }
+
             // Look into specific implementations of placements (like placement.info files)
             var placement = context.FindPlacement(_shapeType, _differentiator, displayType, context);
 
@@ -68,12 +75,19 @@ namespace OrchardCore.DisplayManagement.Views
             {
                 placement = new PlacementInfo() { Location = _defaultLocation };
             }
-            else if (placement.Location == null)
+
+            if (placement.Location == null)
             {
                 // If a placement was found without actual location, use the default.
                 // It can happen when just setting alternates or wrappers for instance.
                 placement.Location = _defaultLocation;
             }
+
+            if (placement.DefaultPosition == null)
+            {
+                placement.DefaultPosition = context.DefaultPosition;
+            }
+
 
             // If there are no placement or it's explicitely noop then stop rendering execution
             if (String.IsNullOrEmpty(placement.Location) || placement.Location == "-")
@@ -90,7 +104,7 @@ namespace OrchardCore.DisplayManagement.Views
                 return;
             }
 
-            var newShape = await _shapeBuilder(context);
+            var newShape = Shape = await _shapeBuilder(context);
 
             // Ignore it if the driver returned a null shape.
             if (newShape == null)
@@ -175,9 +189,11 @@ namespace OrchardCore.DisplayManagement.Views
                 }
             }
 
-            if (String.IsNullOrEmpty(position))
+            position = !String.IsNullOrEmpty(position) ? position : null;
+
+            if (parentShape is ZoneOnDemand zoneOnDemand)
             {
-                parentShape.Add(newShape);
+                await zoneOnDemand.AddAsync(newShape, position);
             }
             else
             {
@@ -259,5 +275,7 @@ namespace OrchardCore.DisplayManagement.Views
             _cache = cache;
             return this;
         }
+
+        public IShape Shape { get; private set; }
     }
 }

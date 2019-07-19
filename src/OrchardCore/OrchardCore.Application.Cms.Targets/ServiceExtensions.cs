@@ -1,4 +1,5 @@
 using System;
+using OrchardCore.ResourceManagement.TagHelpers;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
@@ -23,19 +24,28 @@ namespace Microsoft.Extensions.DependencyInjection
                 .AddCommands()
 
                 .AddMvc()
-
                 .AddSetupFeatures("OrchardCore.Setup")
 
                 .AddDataAccess()
                 .AddDataStorage()
-                .AddBackgroundTasks()
-                .AddDeferredTasks()
+                .AddBackgroundService()
 
                 .AddTheming()
                 .AddLiquidViews()
-                .AddResourceManagement()
-                .AddGeneratorTagFilter()
                 .AddCaching();
+
+            // OrchardCoreBuilder is not available in OrchardCore.ResourceManagement as it has to
+            // remain independent from OrchardCore.
+            builder.ConfigureServices(s =>
+            {
+                s.AddResourceManagement();
+
+                s.AddTagHelpers<LinkTagHelper>();
+                s.AddTagHelpers<MetaTagHelper>();
+                s.AddTagHelpers<ResourcesTagHelper>();
+                s.AddTagHelpers<ScriptTagHelper>();
+                s.AddTagHelpers<StyleTagHelper>();
+            });
 
             configure?.Invoke(builder);
 

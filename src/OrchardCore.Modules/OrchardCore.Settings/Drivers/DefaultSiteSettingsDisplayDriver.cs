@@ -1,16 +1,14 @@
-using System;
 using System.Threading.Tasks;
 using OrchardCore.DisplayManagement.Handlers;
 using OrchardCore.DisplayManagement.Views;
 using OrchardCore.Settings.ViewModels;
-using OrchardCore.Modules;
 
 namespace OrchardCore.Settings.Drivers
 {
     public class DefaultSiteSettingsDisplayDriver : DisplayDriver<ISite>
     {
         public const string GroupId = "general";
-
+        
         public override Task<IDisplayResult> EditAsync(ISite site, BuildEditorContext context)
         {
             return Task.FromResult<IDisplayResult>(
@@ -19,6 +17,9 @@ namespace OrchardCore.Settings.Drivers
                         model.SiteName = site.SiteName;
                         model.BaseUrl = site.BaseUrl;
                         model.TimeZone = site.TimeZoneId;
+                        model.UseCdn = site.UseCdn;
+                        model.CdnBaseUrl = site.CdnBaseUrl;
+                        model.ResourceDebugMode = site.ResourceDebugMode;
                     }).Location("Content:1").OnGroup(GroupId)
             );
         }
@@ -29,11 +30,14 @@ namespace OrchardCore.Settings.Drivers
             {
                 var model = new SiteSettingsViewModel();
 
-                if (await context.Updater.TryUpdateModelAsync(model, Prefix, t => t.SiteName, t => t.BaseUrl, t => t.TimeZone))
+                if (await context.Updater.TryUpdateModelAsync(model, Prefix))
                 {
                     site.SiteName = model.SiteName;
                     site.BaseUrl = model.BaseUrl;
                     site.TimeZoneId = model.TimeZone;
+                    site.UseCdn = model.UseCdn;
+                    site.CdnBaseUrl = model.CdnBaseUrl;
+                    site.ResourceDebugMode = model.ResourceDebugMode;
                 }
             }
 
